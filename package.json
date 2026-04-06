@@ -5,6 +5,6 @@
     "autoprazos"
   ],
   "scripts": {
-    "build": "npm run build --workspace=autoprazos"
+    "build": "npm run build --workspace=autoprazos && mkdir -p dist && cp -rv autoprazos/dist/* dist/"
   }
 }
