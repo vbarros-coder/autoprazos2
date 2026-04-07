@@ -323,7 +323,7 @@ function calcUrgencia(situacao, prazo, today, entrada) {
   const sit = String(situacao || '').toLowerCase();
   if (sit.includes('encerrad') || sit.includes('fechad')) return 'encerrado';
   
-  const order = { 'critico': 3, 'alerta': 2, 'atencao': 1, 'ok': 0, 'encerrado': -1 };
+  const order = { 'critico': 3, 'alerta': 2, 'ok': 0, 'encerrado': -1 };
   let urgD2 = 'ok';
   let urg90 = 'ok';
 
@@ -331,8 +331,7 @@ function calcUrgencia(situacao, prazo, today, entrada) {
   if (prazo) {
     const diff = Math.floor((prazo - today) / 86400000);
     if (diff < 0) urgD2 = 'critico';
-    else if (diff <= 3) urgD2 = 'alerta';
-    else if (diff <= 7) urgD2 = 'atencao';
+    else if (diff <= 7) urgD2 = 'alerta';
   }
 
   // Regra 2: Ciclo 90 dias
@@ -342,8 +341,7 @@ function calcUrgencia(situacao, prazo, today, entrada) {
     const diff90 = Math.floor((p90 - today) / 86400000);
     
     if (diff90 < 0) urg90 = 'critico';
-    else if (diff90 <= 5) urg90 = 'alerta';
-    else if (diff90 <= 15) urg90 = 'atencao';
+    else if (diff90 <= 15) urg90 = 'alerta';
   }
 
   // Retorna o mais urgente entre os dois critérios
@@ -423,8 +421,7 @@ window.setKPIFilter = function(urg) {
 
 function renderKPIs() {
   const crit = allData.filter(d => d._urg === 'critico').length;
-  const alrt = allData.filter(d => d._urg === 'alerta').length;
-  const aten = allData.filter(d => d._urg === 'atencao').length;
+  const alrt = allData.filter(d => d._urg === 'alerta' || d._urg === 'atencao').length;
   const ok   = allData.filter(d => d._urg === 'ok').length;
   const enc  = allData.filter(d => d._urg === 'encerrado').length;
 
@@ -442,16 +439,12 @@ function renderKPIs() {
 
   grid.innerHTML = `
     <div class="kpi-card red ${activeKPIFilter === 'critico' ? 'active-filter' : ''}" onclick="setKPIFilter('critico')">
-      <div class="kpi-icon"><i class="fas fa-fire"></i></div>
-      <div class="kpi-info"><h3>${crit}</h3><p>Críticos</p></div>
+      <div class="kpi-icon"><i class="fas fa-circle-xmark"></i></div>
+      <div class="kpi-info"><h3>${crit}</h3><p>Em Atraso</p></div>
     </div>
     <div class="kpi-card yellow ${activeKPIFilter === 'alerta' ? 'active-filter' : ''}" onclick="setKPIFilter('alerta')">
       <div class="kpi-icon"><i class="fas fa-exclamation-triangle"></i></div>
       <div class="kpi-info"><h3>${alrt}</h3><p>Em Alerta</p></div>
-    </div>
-    <div class="kpi-card orange ${activeKPIFilter === 'atencao' ? 'active-filter' : ''}" onclick="setKPIFilter('atencao')">
-      <div class="kpi-icon"><i class="fas fa-eye"></i></div>
-      <div class="kpi-info"><h3>${aten}</h3><p>Atenção</p></div>
     </div>
     <div class="kpi-card green ${activeKPIFilter === 'ok' ? 'active-filter' : ''}" onclick="setKPIFilter('ok')">
       <div class="kpi-icon"><i class="fas fa-check-circle"></i></div>
@@ -477,9 +470,9 @@ function renderTable() {
 
   tbody.innerHTML = page.map(d => {
     const urgMap = {
-      critico: '<span class="px-2 py-1 rounded-full bg-red-100 text-red-800 text-[10px] font-bold">CRÍTICO</span>',
-      alerta: '<span class="px-2 py-1 rounded-full bg-yellow-100 text-yellow-800 text-[10px] font-bold">ALERTA</span>',
-      atencao: '<span class="px-2 py-1 rounded-full bg-orange-100 text-orange-800 text-[10px] font-bold">ATENÇÃO</span>',
+      critico: '<span class="px-2 py-1 rounded-full bg-red-100 text-red-800 text-[10px] font-bold">EM ATRASO</span>',
+      alerta: '<span class="px-2 py-1 rounded-full bg-yellow-100 text-yellow-800 text-[10px] font-bold">EM ALERTA</span>',
+      atencao: '<span class="px-2 py-1 rounded-full bg-yellow-100 text-yellow-800 text-[10px] font-bold">EM ALERTA</span>',
       ok: '<span class="px-2 py-1 rounded-full bg-green-100 text-green-800 text-[10px] font-bold">OK</span>',
       encerrado: '<span class="px-2 py-1 rounded-full bg-gray-100 text-gray-800 text-[10px] font-bold">FECHADO</span>'
     };
