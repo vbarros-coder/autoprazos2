@@ -5,9 +5,74 @@
 let allData = [];
 let filteredData = [];
 let activeKPIFilter = null;
+let currentTab = 'geral'; // 'geral' ou 'faturamento'
 let currentSort = { field: '_urg', dir: 'asc' };
 let currentPage = 1;
 const rowsPerPage = 15;
+const STORAGE_KEY = 'nie-dashboard-data';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PERSISTÊNCIA LOCAL (localStorage)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function saveToStorage() {
+  try {
+    // Converter Date para ISO string antes de salvar
+    const serialized = allData.map(d => {
+      const obj = { ...d };
+      const dateFields = ['data_sinistro','data_entrada','data_vistoria','prazo_d2','prazo_90d','data_envio_prelim','data_ultimo_doc'];
+      dateFields.forEach(f => { if (obj[f] instanceof Date) obj[f] = obj[f].toISOString(); });
+      return obj;
+    });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(serialized));
+  } catch(e) {
+    console.warn('Erro ao salvar dados localmente:', e);
+  }
+}
+
+function loadFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    const dateFields = ['data_sinistro','data_entrada','data_vistoria','prazo_d2','prazo_90d','data_envio_prelim','data_ultimo_doc'];
+    return parsed.map(d => {
+      dateFields.forEach(f => { if (d[f]) d[f] = new Date(d[f]); });
+      return d;
+    });
+  } catch(e) {
+    console.warn('Erro ao restaurar dados locais:', e);
+    return [];
+  }
+}
+
+// Mescla novos dados com existentes: atualiza campos da planilha, preserva edições manuais
+function mergeData(existingData, newData) {
+  const existingMap = new Map(existingData.map(d => [d.addvalora, d]));
+  const newMap = new Map(newData.map(d => [d.addvalora, d]));
+
+  // Atualizar/adicionar processos da nova planilha
+  newData.forEach(newRow => {
+    const existing = existingMap.get(newRow.addvalora);
+    if (existing) {
+      // Preservar data_ultimo_doc editada manualmente se a nova planilha não tiver
+      const preservedLastDoc = (!newRow.data_ultimo_doc && existing.data_ultimo_doc) ? existing.data_ultimo_doc : newRow.data_ultimo_doc;
+      existingMap.set(newRow.addvalora, { ...newRow, data_ultimo_doc: preservedLastDoc });
+    } else {
+      existingMap.set(newRow.addvalora, newRow);
+    }
+  });
+
+  // Manter processos antigos que sumiram da nova planilha (marcados como arquivados)
+  existingData.forEach(old => {
+    if (!newMap.has(old.addvalora)) {
+      // Mantém o registro, recalcula urgência com a data de hoje
+      existingMap.set(old.addvalora, old);
+    }
+  });
+
+  return Array.from(existingMap.values());
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INICIALIZAÇÃO
@@ -21,9 +86,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const savedUrl = localStorage.getItem('gas-url');
   if (savedUrl) document.getElementById('gas-url').value = savedUrl;
 
-  // Iniciar com KPIs zerados e tabela vazia
-  renderKPIs();
-  renderTable();
+  // Restaurar dados salvos anteriormente
+  const stored = loadFromStorage();
+  if (stored.length > 0) {
+    allData = stored;
+    document.getElementById('data-tag').innerHTML = `<i class="fas fa-database text-green-300"></i> ${allData.length} processos restaurados · dados salvos`;
+    document.getElementById('sync-bar').classList.add('show');
+    document.getElementById('sync-status').textContent = `${allData.length} registros carregados do armazenamento local`;
+    fillFilters();
+    applyF();
+    showToast(`${allData.length} processos restaurados automaticamente.`, 'ok');
+  } else {
+    renderKPIs();
+    renderTable();
+  }
 });
 
 function updateClock() {
@@ -73,16 +149,27 @@ window.handleUpload = function(event) {
     }
 
     if (parsed.length > 0) {
-      allData = parsed;
-      document.getElementById('data-tag').innerHTML = `<i class="fas fa-check-circle text-green-500"></i> ${parsed.length} processos · ${source}`;
+      // Mesclar com dados existentes em vez de substituir
+      const existing = loadFromStorage();
+      const newCount = parsed.filter(p => !existing.find(e => e.addvalora === p.addvalora)).length;
+      const updCount = parsed.filter(p => existing.find(e => e.addvalora === p.addvalora)).length;
+
+      allData = mergeData(existing, parsed);
+      saveToStorage();
+
+      const detailMsg = existing.length > 0
+        ? `${newCount} novos · ${updCount} atualizados · ${allData.length - parsed.length} mantidos de exportações anteriores`
+        : `${parsed.length} processos carregados`;
+
+      document.getElementById('data-tag').innerHTML = `<i class="fas fa-check-circle text-green-500"></i> ${allData.length} processos · ${source}`;
       
       // Mostrar barra de sincronização se houver dados
       document.getElementById('sync-bar').classList.add('show');
-      document.getElementById('sync-status').textContent = `Pronto para sincronizar ${parsed.length} registros`;
+      document.getElementById('sync-status').textContent = `${detailMsg}`;
 
       fillFilters();
       applyF();
-      showToast(`Sucesso! ${parsed.length} registros carregados.`, 'ok');
+      showToast(`Sucesso! ${detailMsg}.`, 'ok');
     } else {
       showToast('Nenhum dado válido encontrado na planilha.', 'err');
     }
@@ -279,12 +366,40 @@ function fillFilters() {
     stats.map(s => `<option value="${s}">${s}</option>`).join('');
 }
 
+window.setTab = function(tab) {
+  currentTab = tab;
+  
+  // Atualizar UI das abas
+  const btnGeral = document.getElementById('tab-geral');
+  const btnFat = document.getElementById('tab-faturamento');
+  
+  if (tab === 'geral') {
+    btnGeral.classList.add('border-blue-900', 'text-blue-900');
+    btnGeral.classList.remove('border-transparent', 'text-gray-500');
+    btnFat.classList.remove('border-blue-900', 'text-blue-900');
+    btnFat.classList.add('border-transparent', 'text-gray-500');
+  } else {
+    btnFat.classList.add('border-blue-900', 'text-blue-900');
+    btnFat.classList.remove('border-transparent', 'text-gray-500');
+    btnGeral.classList.remove('border-blue-900', 'text-blue-900');
+    btnGeral.classList.add('border-transparent', 'text-gray-500');
+  }
+  
+  applyF();
+};
+
 window.applyF = function() {
   const term = document.getElementById('srch').value.toLowerCase();
   const reg = document.getElementById('f-reg').value;
   const stat = document.getElementById('f-status').value;
 
   filteredData = allData.filter(d => {
+    // Se estiver na aba faturamento, filtra apenas os de faturamento
+    if (currentTab === 'faturamento') {
+      const isFat = String(d.status || '').toLowerCase().includes('faturamento');
+      if (!isFat) return false;
+    }
+
     if (activeKPIFilter && d._urg !== activeKPIFilter) return false;
     if (reg && d.regulador !== reg) return false;
     if (stat && d.status !== stat) return false;
@@ -626,13 +741,27 @@ window.updateLastDoc = function(ref, newValue) {
   const d = allData.find(x => x.addvalora === ref);
   if (d) {
     d.data_ultimo_doc = newValue ? new Date(newValue + 'T12:00:00') : null;
-    showToast(`Data do último documento atualizada para ${ref}`, 'ok');
+    saveToStorage(); // Persistir edição manual imediatamente
+    showToast(`Data do último documento atualizada e salva para ${ref}`, 'ok');
     applyF(); // Atualiza a tabela se necessário
   }
 };
 
 window.closeM = function() {
   document.getElementById('modal-ov').classList.remove('show');
+};
+
+window.clearStorage = function() {
+  if (!confirm(`Tem certeza? Isso apagará todos os ${allData.length} processos salvos no navegador. Essa ação não pode ser desfeita.`)) return;
+  localStorage.removeItem(STORAGE_KEY);
+  allData = [];
+  filteredData = [];
+  document.getElementById('data-tag').innerHTML = `<i class="fas fa-info-circle"></i> Aguardando importação...`;
+  document.getElementById('sync-bar').classList.remove('show');
+  fillFilters();
+  renderKPIs();
+  renderTable();
+  showToast('Dados apagados. Importe uma nova planilha.', 'wrn');
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -653,22 +782,33 @@ function showToast(msg, type) {
   setTimeout(() => toast.remove(), 4000);
 }
 
-window.exportCSV = function() {
-  if (filteredData.length === 0) return;
-  const headers = ['Addvalora', 'Segurado', 'Regulador', 'Seguradora', 'Status', 'Entrada', 'Prazo', 'Dias'];
-  const rows = filteredData.map(d => [
+window.exportXLSX = function() {
+  if (allData.length === 0) return;
+  
+  const headers = ['Ref Addvalora', 'Segurado', 'Regulador', 'Seguradora', 'Status', 'Entrada', 'Prazo Prelim.', 'Prazo 90d', 'Dias Aberto', 'Situação'];
+  
+  const fmtRow = (d) => [
     d.addvalora, d.segurado, d.regulador, d.seguradora, d.status,
-    d.data_entrada ? d.data_entrada.toLocaleDateString('pt-BR') : '',
-    d.prazo_d2 ? d.prazo_d2.toLocaleDateString('pt-BR') : '',
-    d._diasAbertos
-  ]);
-  
-  let csv = headers.join(';') + '\n';
-  rows.forEach(r => csv += r.join(';') + '\n');
-  
-  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `NIE_Dashboard_${new Date().toLocaleDateString()}.csv`;
-  link.click();
+    d.data_entrada ? d.data_entrada.toLocaleDateString('pt-BR') : '—',
+    d.prazo_d2 ? d.prazo_d2.toLocaleDateString('pt-BR') : '—',
+    d.prazo_90d ? d.prazo_90d.toLocaleDateString('pt-BR') : '—',
+    d._diasAbertos || 0,
+    d._urg.toUpperCase()
+  ];
+
+  // Aba Geral (Data filtrada atualmente)
+  const rowsGeral = [headers, ...filteredData.map(fmtRow)];
+  const wsGeral = XLSX.utils.aoa_to_sheet(rowsGeral);
+
+  // Aba Faturamento (Apenas status faturamento)
+  const dataFat = allData.filter(d => String(d.status || '').toLowerCase().includes('faturamento'));
+  const rowsFat = [headers, ...dataFat.map(fmtRow)];
+  const wsFat = XLSX.utils.aoa_to_sheet(rowsFat);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, wsGeral, "Dashboard Geral");
+  XLSX.utils.book_append_sheet(wb, wsFat, "Faturamento");
+
+  XLSX.writeFile(wb, `NIE_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
+  showToast('Planilha exportada com sucesso!', 'ok');
 };

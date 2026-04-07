@@ -319,6 +319,9 @@ const html = `<!DOCTYPE html>
         <button class="btn-export" onclick="exportXLSX()">
           <i class="fas fa-file-excel"></i> Exportar Planilha
         </button>
+        <button onclick="clearStorage()" title="Apagar todos os dados salvos" style="background:#fee2e2;color:#b91c1c;border:none;border-radius:8px;padding:7px 14px;font-size:0.8rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;">
+          <i class="fas fa-trash"></i> Limpar Dados
+        </button>
       </div>
     </div>
     <div class="table-wrapper">
